@@ -1,9 +1,11 @@
+use crate::serde::SerdeObject;
+use crate::{ff::Field, ff_ext::Legendre};
 use ark_std::{end_timer, start_timer};
-use ff::Field;
 use rand::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
-use crate::serde::SerdeObject;
+#[cfg(feature = "derive_serde")]
+use serde::{Deserialize, Serialize};
 
 pub fn random_field_tests<F: Field>(type_name: String) {
     let mut rng = XorShiftRng::from_seed([
@@ -46,7 +48,7 @@ pub fn random_field_tests<F: Field>(type_name: String) {
 }
 
 fn random_multiplication_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
-    let _message = format!("multiplication {}", type_name);
+    let _message = format!("multiplication {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         let a = F::random(&mut rng);
@@ -72,7 +74,7 @@ fn random_multiplication_tests<F: Field, R: RngCore>(mut rng: R, type_name: Stri
 }
 
 fn random_addition_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
-    let _message = format!("addition {}", type_name);
+    let _message = format!("addition {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         let a = F::random(&mut rng);
@@ -98,7 +100,7 @@ fn random_addition_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
 }
 
 fn random_subtraction_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
-    let _message = format!("subtraction {}", type_name);
+    let _message = format!("subtraction {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         let a = F::random(&mut rng);
@@ -119,7 +121,7 @@ fn random_subtraction_tests<F: Field, R: RngCore>(mut rng: R, type_name: String)
 }
 
 fn random_negation_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
-    let _message = format!("negation {}", type_name);
+    let _message = format!("negation {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         let a = F::random(&mut rng);
@@ -133,7 +135,7 @@ fn random_negation_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
 }
 
 fn random_doubling_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
-    let _message = format!("doubling {}", type_name);
+    let _message = format!("doubling {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         let mut a = F::random(&mut rng);
@@ -147,7 +149,7 @@ fn random_doubling_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
 }
 
 fn random_squaring_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
-    let _message = format!("squaring {}", type_name);
+    let _message = format!("squaring {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         let mut a = F::random(&mut rng);
@@ -163,7 +165,7 @@ fn random_squaring_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
 fn random_inversion_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
     assert!(bool::from(F::ZERO.invert().is_none()));
 
-    let _message = format!("inversion {}", type_name);
+    let _message = format!("inversion {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         let mut a = F::random(&mut rng);
@@ -176,7 +178,7 @@ fn random_inversion_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
 }
 
 fn random_expansion_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
-    let _message = format!("expansion {}", type_name);
+    let _message = format!("expansion {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         // Compare (a + b)(c + d) and (a*c + b*c + a*d + b*d)
@@ -210,12 +212,47 @@ fn random_expansion_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
     end_timer!(start);
 }
 
+pub fn random_conversion_tests<F: ff::PrimeField<Repr = [u8; 32]>>(type_name: String) {
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
+    let _message = format!("conversion {type_name}");
+    let start = start_timer!(|| _message);
+    for _ in 0..1000000 {
+        let a = F::random(&mut rng);
+        let bytes = a.to_repr();
+        let b = F::from_repr(bytes).unwrap();
+        assert_eq!(a, b);
+    }
+    end_timer!(start);
+}
+
+#[cfg(feature = "bits")]
+pub fn random_bits_tests<F: ff::PrimeFieldBits>(type_name: String) {
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
+    let _message = format!("to_le_bits {type_name}");
+    let start = start_timer!(|| _message);
+    for _ in 0..1000000 {
+        let a = F::random(&mut rng);
+        let bytes = a.to_repr();
+        let bits = a.to_le_bits();
+        for idx in 0..bits.len() {
+            assert_eq!(bits[idx], ((bytes.as_ref()[idx / 8] >> (idx % 8)) & 1) == 1);
+        }
+    }
+    end_timer!(start);
+}
+
 pub fn random_serialization_test<F: Field + SerdeObject>(type_name: String) {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
     ]);
-    let _message = format!("serialization {}", type_name);
+    let _message = format!("serialization with SerdeObject {type_name}");
     let start = start_timer!(|| _message);
     for _ in 0..1000000 {
         let a = F::random(&mut rng);
@@ -228,4 +265,45 @@ pub fn random_serialization_test<F: Field + SerdeObject>(type_name: String) {
         assert_eq!(a, b);
     }
     end_timer!(start);
+}
+
+#[cfg(feature = "derive_serde")]
+pub fn random_serde_test<F>(type_name: String)
+where
+    F: Field + SerdeObject + Serialize + for<'de> Deserialize<'de>,
+{
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
+    let _message = format!("serialization with serde {type_name}");
+    let start = start_timer!(|| _message);
+    for _ in 0..1000000 {
+        // byte serialization
+        let a = F::random(&mut rng);
+        let bytes = bincode::serialize(&a).unwrap();
+        let reader = std::io::Cursor::new(bytes);
+        let b: F = bincode::deserialize_from(reader).unwrap();
+        assert_eq!(a, b);
+
+        // json serialization
+        let json = serde_json::to_string(&a).unwrap();
+        let reader = std::io::Cursor::new(json);
+        let b: F = serde_json::from_reader(reader).unwrap();
+        assert_eq!(a, b);
+    }
+    end_timer!(start);
+}
+
+pub fn random_quadratic_residue_test<F: Field + Legendre>() {
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
+    for _ in 0..100000 {
+        let elem = F::random(&mut rng);
+        let is_quad_res_or_zero: bool = elem.sqrt().is_some().into();
+        let is_quad_non_res: bool = elem.ct_quadratic_non_residue().into();
+        assert_eq!(!is_quad_non_res, is_quad_res_or_zero)
+    }
 }

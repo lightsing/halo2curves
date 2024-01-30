@@ -1,11 +1,16 @@
 use super::fq::Fq;
 use super::fq2::Fq2;
 use super::fq6::Fq6;
+use crate::ff::Field;
 use core::ops::{Add, Mul, Neg, Sub};
-use ff::Field;
 use rand::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
+/// -GAMMA is a quadratic non-residue in Fp6. Fp12 = Fp6[X]/(X^2 + GAMMA)
+/// We introduce the variable w such that w^2 = -GAMMA
+// GAMMA = - v
+
+/// An element of Fq12, represented by c0 + c1 * w.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 pub struct Fq12 {
     pub c0: Fq6,
@@ -582,7 +587,7 @@ fn test_frobenius() {
             let mut b = a;
 
             for _ in 0..i {
-                a = a.pow_vartime(&[
+                a = a.pow_vartime([
                     0x3c208c16d87cfd47,
                     0x97816a916871ca8d,
                     0xb85045b68181585d,

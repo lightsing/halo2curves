@@ -1,14 +1,18 @@
 use super::fq::{Fq, NEGATIVE_ONE};
-use super::LegendreSymbol;
+use crate::ff::{Field, FromUniformBytes, PrimeField, WithSmallOrderMulGroup};
+use crate::ff_ext::Legendre;
 use core::convert::TryInto;
 use core::ops::{Add, Mul, Neg, Sub};
-use ff::{Field, FromUniformBytes, PrimeField, WithSmallOrderMulGroup};
 use rand::RngCore;
 use std::cmp::Ordering;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
-/// An element of Fq2, represented by c0 + c1 * u.
+#[cfg(feature = "derive_serde")]
+use serde::{Deserialize, Serialize};
+
+/// An element of Fq2, represented by c0 + c1 * u; where u^2 = -1.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "derive_serde", derive(Serialize, Deserialize))]
 pub struct Fq2 {
     pub c0: Fq,
     pub c1: Fq,
@@ -170,16 +174,13 @@ impl Fq2 {
         res
     }
 
-    pub fn legendre(&self) -> LegendreSymbol {
-        self.norm().legendre()
-    }
-
     pub fn mul_assign(&mut self, other: &Self) {
-        let mut t1 = self.c0 * other.c0;
         let mut t0 = self.c0 + self.c1;
+        let mut t1 = self.c0 * other.c0;
         let t2 = self.c1 * other.c1;
-        self.c1 = other.c0 + other.c1;
+
         self.c0 = t1 - t2;
+        self.c1 = other.c0 + other.c1;
         t1 += t2;
         t0 *= self.c1;
         self.c1 = t0 - t1;
@@ -247,12 +248,14 @@ impl Fq2 {
     }
 
     pub fn frobenius_map(&mut self, power: usize) {
-        self.c1 *= &FROBENIUS_COEFF_FQ2_C1[power % 2];
+        if power % 2 != 0 {
+            self.conjugate()
+        }
     }
 
     /// Multiply this element by quadratic nonresidue 9 + u.
     pub fn mul_by_nonresidue(&mut self) {
-        // (xi+y)(i+9) = (9x+y)i+(9y-x)
+        // (xu+y)(u+9) = (9x+y)u+(9y-x)
         let t0 = self.c0;
         let t1 = self.c1;
 
@@ -266,41 +269,10 @@ impl Fq2 {
         // (9*y - x)
         self.c0 -= &t1;
 
-        // (9*x)i
+        // (9*x)u
         self.c1 += &t1;
         // (9*x + y)
         self.c1 += &t0;
-    }
-
-    // Multiply this element by ξ where ξ=i+9
-    pub fn mul_by_xi(&mut self) {
-        // (xi+y)(i+9) = (9x+y)i+(9y-x)
-        let t0 = self.c0;
-        let t1 = self.c1;
-
-        // 8*x*i + 8*y
-        self.double_assign();
-        self.double_assign();
-        self.double_assign();
-
-        // 9*y
-        self.c0 += &t0;
-        // (9*y - x)
-        self.c0 -= &t1;
-
-        // (9*x)i
-        self.c1 += &t1;
-        // (9*x + y)
-        self.c1 += &t0;
-    }
-
-    /// Norm of Fq2 as extension field in i over Fq
-    pub fn norm(&self) -> Fq {
-        let mut t0 = self.c0;
-        let mut t1 = self.c1;
-        t0 = t0.square();
-        t1 = t1.square();
-        t1 + t0
     }
 
     pub fn invert(&self) -> CtOption<Self> {
@@ -320,6 +292,22 @@ impl Fq2 {
 
             tmp
         })
+    }
+
+    /// Norm of Fq2 as extension field in i over Fq
+    #[inline]
+    fn norm(&self) -> Fq {
+        let mut t0 = self.c0;
+        let mut t1 = self.c1;
+        t0 = t0.square();
+        t1 = t1.square();
+        t1 + t0
+    }
+}
+
+impl Legendre for Fq2 {
+    fn legendre(&self) -> i64 {
+        self.norm().legendre()
     }
 }
 
@@ -360,7 +348,7 @@ impl Field for Fq2 {
                 0x6e14116da0605617,
                 0x0c19139cb84c680a,
             ];
-            let mut a1 = self.pow(&u);
+            let mut a1 = self.pow(u);
             let mut alpha = a1;
 
             alpha.square_assign();
@@ -394,7 +382,7 @@ impl Field for Fq2 {
                         0xdc2822db40c0ac2e,
                         0x183227397098d014,
                     ];
-                    alpha = alpha.pow(&u);
+                    alpha = alpha.pow(u);
                     a1.mul_assign(&alpha);
                 }
                 CtOption::new(a1, Choice::from(1))
@@ -543,32 +531,14 @@ impl WithSmallOrderMulGroup<3> for Fq2 {
     // Fq::ZETA ^2
     const ZETA: Self = Fq2 {
         c0: Fq::from_raw([
-            0xe4bd44e5607cfd48,
-            0xc28f069fbb966e3d,
-            0x5e6dd9e7e0acccb0,
-            0x30644e72e131a029,
+            0x5763473177fffffe,
+            0xd4f263f1acdb5c4f,
+            0x59e26bcea0d48bac,
+            0x0000000000000000,
         ]),
         c1: Fq::zero(),
     };
 }
-
-pub const FROBENIUS_COEFF_FQ2_C1: [Fq; 2] = [
-    // Fq(-1)**(((q^0) - 1) / 2)
-    // it's 1 in Montgommery form
-    Fq([
-        0xd35d438dc58f0d9d,
-        0x0a78eb28f5c70b3d,
-        0x666ea36f7879462c,
-        0x0e0a77c19a07df2f,
-    ]),
-    // Fq(-1)**(((q^1) - 1) / 2)
-    Fq([
-        0x68c3488912edefaa,
-        0x8d087f6872aabf4f,
-        0x51e1a24709081231,
-        0x2259d6b14729c0fa,
-    ]),
-];
 
 #[cfg(test)]
 use rand::SeedableRng;
@@ -693,17 +663,6 @@ fn test_fq2_mul_nonresidue() {
 }
 
 #[test]
-fn test_fq2_legendre() {
-    assert_eq!(LegendreSymbol::Zero, Fq2::ZERO.legendre());
-    // i^2 = -1
-    let mut m1 = Fq2::ONE;
-    m1 = m1.neg();
-    assert_eq!(LegendreSymbol::QuadraticResidue, m1.legendre());
-    m1.mul_by_nonresidue();
-    assert_eq!(LegendreSymbol::QuadraticNonResidue, m1.legendre());
-}
-
-#[test]
 pub fn test_sqrt() {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -712,7 +671,7 @@ pub fn test_sqrt() {
 
     for _ in 0..10000 {
         let a = Fq2::random(&mut rng);
-        if a.legendre() == LegendreSymbol::QuadraticNonResidue {
+        if a.legendre() == -1 {
             assert!(bool::from(a.sqrt().is_none()));
         }
     }
@@ -721,7 +680,7 @@ pub fn test_sqrt() {
         let a = Fq2::random(&mut rng);
         let mut b = a;
         b.square_assign();
-        assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
+        assert_eq!(b.legendre(), 1);
 
         let b = b.sqrt().unwrap();
         let mut negb = b;
@@ -734,7 +693,7 @@ pub fn test_sqrt() {
     for _ in 0..10000 {
         let mut b = c;
         b.square_assign();
-        assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
+        assert_eq!(b.legendre(), 1);
 
         b = b.sqrt().unwrap();
 
@@ -761,7 +720,7 @@ fn test_frobenius() {
             let mut b = a;
 
             for _ in 0..i {
-                a = a.pow(&[
+                a = a.pow([
                     0x3c208c16d87cfd47,
                     0x97816a916871ca8d,
                     0xb85045b68181585d,
@@ -776,6 +735,12 @@ fn test_frobenius() {
 }
 
 #[test]
+fn test_zeta() {
+    let zeta = Fq2::new(Fq::ZETA.square(), Fq::zero());
+    assert_eq!(zeta, Fq2::ZETA);
+}
+
+#[test]
 fn test_field() {
     crate::tests::field::random_field_tests::<Fq2>("fq2".to_string());
 }
@@ -783,4 +748,6 @@ fn test_field() {
 #[test]
 fn test_serialization() {
     crate::tests::field::random_serialization_test::<Fq2>("fq2".to_string());
+    #[cfg(feature = "derive_serde")]
+    crate::tests::field::random_serde_test::<Fq2>("fq2".to_string());
 }

@@ -5,13 +5,13 @@ use crate::bn256::fq12::*;
 use crate::bn256::fq2::*;
 use crate::bn256::fq6::FROBENIUS_COEFF_FQ6_C1;
 use crate::bn256::fr::*;
-use crate::pairing::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
+use crate::ff::{Field, PrimeField};
+use crate::group::cofactor::CofactorCurveAffine;
+use crate::group::Group;
 use core::borrow::Borrow;
 use core::iter::Sum;
 use core::ops::{Add, Mul, MulAssign, Neg, Sub};
-use ff::{Field, PrimeField};
-use group::cofactor::CofactorCurveAffine;
-use group::Group;
+use pairing::{Engine, MillerLoopResult, MultiMillerLoop, PairingCurveAffine};
 use rand_core::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
@@ -62,7 +62,7 @@ pub struct Gt(pub(crate) Fq12);
 
 impl std::fmt::Display for Gt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -271,7 +271,7 @@ impl G2Prepared {
 
             r.y -= &tmp2;
 
-            // up to here everything was by algorith, line 11
+            // up to here everything was by algorithm, line 11
             // use R instead of new T
 
             // tmp3 is the first part of line 12
@@ -633,7 +633,7 @@ pub fn pairing(g1: &G1Affine, g2: &G2Affine) -> Gt {
 pub struct Bn256;
 
 impl Engine for Bn256 {
-    type Scalar = Fr;
+    type Fr = Fr;
     type G1 = G1;
     type G1Affine = G1Affine;
     type G2 = G2;

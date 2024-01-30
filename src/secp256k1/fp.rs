@@ -1,8 +1,14 @@
-use crate::arithmetic::{adc, mac, sbb};
+use crate::arithmetic::{adc, mac, macx, sbb};
+use crate::extend_field_legendre;
+use crate::ff::{FromUniformBytes, PrimeField, WithSmallOrderMulGroup};
+use crate::{
+    field_arithmetic, field_bits, field_common, field_specific, impl_add_binop_specify_output,
+    impl_binops_additive, impl_binops_additive_specify_output, impl_binops_multiplicative,
+    impl_binops_multiplicative_mixed, impl_from_u64, impl_sub_binop_specify_output, impl_sum_prod,
+};
 use core::convert::TryInto;
 use core::fmt;
 use core::ops::{Add, Mul, Neg, Sub};
-use ff::{FromUniformBytes, PrimeField, WithSmallOrderMulGroup};
 use rand::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
@@ -16,6 +22,9 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 // Montgomery form; i.e., Fp(a) = aR mod p, with R = 2^256.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Fp(pub(crate) [u64; 4]);
+
+#[cfg(feature = "derive_serde")]
+crate::serialize_deserialize_32_byte_primefield!(Fp);
 
 /// Constant representing the modulus
 /// p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f
@@ -102,11 +111,6 @@ const ROOT_OF_UNITY_INV: Fp = Fp([
     0xffffffffffffffffu64,
 ]);
 
-use crate::{
-    field_arithmetic, field_common, field_specific, impl_add_binop_specify_output,
-    impl_binops_additive, impl_binops_additive_specify_output, impl_binops_multiplicative,
-    impl_binops_multiplicative_mixed, impl_sub_binop_specify_output, impl_sum_prod,
-};
 impl_binops_additive!(Fp, Fp);
 impl_binops_multiplicative!(Fp, Fp);
 field_common!(
@@ -122,8 +126,14 @@ field_common!(
     R2,
     R3
 );
+impl_from_u64!(Fp, R2);
 field_arithmetic!(Fp, MODULUS, INV, dense);
 impl_sum_prod!(Fp);
+
+#[cfg(target_pointer_width = "64")]
+field_bits!(Fp, MODULUS);
+#[cfg(not(target_pointer_width = "64"))]
+field_bits!(Fp, MODULUS, MODULUS_LIMBS_32);
 
 impl Fp {
     pub const fn size() -> usize {
@@ -159,7 +169,7 @@ impl ff::Field for Fp {
 
     /// Computes the square root of this element, if it exists.
     fn sqrt(&self) -> CtOption<Self> {
-        let tmp = self.pow(&[
+        let tmp = self.pow([
             0xffffffffbfffff0c,
             0xffffffffffffffff,
             0xffffffffffffffff,
@@ -169,17 +179,10 @@ impl ff::Field for Fp {
         CtOption::new(tmp, tmp.square().ct_eq(self))
     }
 
-    /// Computes the multiplicative inverse of this element,
-    /// failing if the element is zero.
+    /// Returns the multiplicative inverse of the
+    /// element. If it is zero, the method fails.
     fn invert(&self) -> CtOption<Self> {
-        let tmp = self.pow_vartime(&[
-            0xfffffffefffffc2d,
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-            0xffffffffffffffff,
-        ]);
-
-        CtOption::new(tmp, !self.ct_eq(&Self::zero()))
+        self.invert()
     }
 
     fn pow_vartime<S: AsRef<[u64]>>(&self, exp: S) -> Self {
@@ -245,15 +248,12 @@ impl ff::PrimeField for Fp {
     }
 
     fn to_repr(&self) -> Self::Repr {
-        // Turn into canonical form by computing
-        // (a.R) / R = a
-        let tmp = Fp::montgomery_reduce(&[self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0]);
-
+        let tmp: [u64; 4] = (*self).into();
         let mut res = [0; 32];
-        res[0..8].copy_from_slice(&tmp.0[0].to_le_bytes());
-        res[8..16].copy_from_slice(&tmp.0[1].to_le_bytes());
-        res[16..24].copy_from_slice(&tmp.0[2].to_le_bytes());
-        res[24..32].copy_from_slice(&tmp.0[3].to_le_bytes());
+        res[0..8].copy_from_slice(&tmp[0].to_le_bytes());
+        res[8..16].copy_from_slice(&tmp[1].to_le_bytes());
+        res[16..24].copy_from_slice(&tmp[2].to_le_bytes());
+        res[24..32].copy_from_slice(&tmp[3].to_le_bytes());
 
         res
     }
@@ -287,6 +287,8 @@ impl FromUniformBytes<64> for Fp {
 impl WithSmallOrderMulGroup<3> for Fp {
     const ZETA: Self = ZETA;
 }
+
+extend_field_legendre!(Fp);
 
 #[cfg(test)]
 mod test {
@@ -325,18 +327,12 @@ mod test {
 
     #[test]
     fn test_delta() {
-        assert_eq!(
-            Fp::DELTA,
-            MULTIPLICATIVE_GENERATOR.pow(&[1u64 << Fp::S, 0, 0, 0])
-        );
+        assert_eq!(Fp::DELTA, MULTIPLICATIVE_GENERATOR.pow([1u64 << Fp::S]));
     }
 
     #[test]
     fn test_root_of_unity() {
-        assert_eq!(
-            Fp::ROOT_OF_UNITY.pow_vartime(&[1 << Fp::S, 0, 0, 0]),
-            Fp::one()
-        );
+        assert_eq!(Fp::ROOT_OF_UNITY.pow_vartime([1 << Fp::S]), Fp::one());
     }
 
     #[test]
@@ -350,7 +346,25 @@ mod test {
     }
 
     #[test]
+    fn test_conversion() {
+        crate::tests::field::random_conversion_tests::<Fp>("secp256k1 base".to_string());
+    }
+
+    #[test]
+    #[cfg(feature = "bits")]
+    fn test_bits() {
+        crate::tests::field::random_bits_tests::<Fp>("secp256k1 base".to_string());
+    }
+
+    #[test]
     fn test_serialization() {
         crate::tests::field::random_serialization_test::<Fp>("secp256k1 base".to_string());
+        #[cfg(feature = "derive_serde")]
+        crate::tests::field::random_serde_test::<Fp>("secp256k1 base".to_string());
+    }
+
+    #[test]
+    fn test_quadratic_residue() {
+        crate::tests::field::random_quadratic_residue_test::<Fp>();
     }
 }

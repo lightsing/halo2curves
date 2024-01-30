@@ -1,14 +1,19 @@
 #[cfg(feature = "asm")]
-use super::assembly::field_arithmetic_asm;
+use crate::bn256::assembly::field_arithmetic_asm;
 #[cfg(not(feature = "asm"))]
-use crate::{field_arithmetic, field_specific};
+use crate::{arithmetic::macx, field_arithmetic, field_specific};
 
-use super::LegendreSymbol;
 use crate::arithmetic::{adc, mac, sbb};
+use crate::extend_field_legendre;
+use crate::ff::{FromUniformBytes, PrimeField, WithSmallOrderMulGroup};
+use crate::{
+    field_bits, field_common, impl_add_binop_specify_output, impl_binops_additive,
+    impl_binops_additive_specify_output, impl_binops_multiplicative,
+    impl_binops_multiplicative_mixed, impl_from_u64, impl_sub_binop_specify_output, impl_sum_prod,
+};
 use core::convert::TryInto;
 use core::fmt;
 use core::ops::{Add, Mul, Neg, Sub};
-use ff::{Field, FromUniformBytes, PrimeField, WithSmallOrderMulGroup};
 use rand::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
@@ -23,14 +28,30 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Fq(pub(crate) [u64; 4]);
 
+#[cfg(feature = "derive_serde")]
+crate::serialize_deserialize_32_byte_primefield!(Fq);
+
 /// Constant representing the modulus
 /// q = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
-pub const MODULUS: Fq = Fq([
+const MODULUS: Fq = Fq([
     0x3c208c16d87cfd47,
     0x97816a916871ca8d,
     0xb85045b68181585d,
     0x30644e72e131a029,
 ]);
+
+/// The modulus as u32 limbs.
+#[cfg(not(target_pointer_width = "64"))]
+const MODULUS_LIMBS_32: [u32; 8] = [
+    0xd87c_fd47,
+    0x3c20_8c16,
+    0x6871_ca8d,
+    0x9781_6a91,
+    0x8181_585d,
+    0xb850_45b6,
+    0xe131_a029,
+    0x3064_4e72,
+];
 
 /// INV = -(q^{-1} mod 2^64) mod 2^64
 const INV: u64 = 0x87d20782e4866389;
@@ -79,28 +100,33 @@ const TWO_INV: Fq = Fq::from_raw([
     0x183227397098d014,
 ]);
 
-// TODO: Can we simply put 0 here::
-const ROOT_OF_UNITY: Fq = Fq::zero();
+/// `0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd46`
+const ROOT_OF_UNITY: Fq = Fq::from_raw([
+    0x3c208c16d87cfd46,
+    0x97816a916871ca8d,
+    0xb85045b68181585d,
+    0x30644e72e131a029,
+]);
 
-// Unused constant for base field
-const ROOT_OF_UNITY_INV: Fq = Fq::zero();
+/// `0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd46`
+const ROOT_OF_UNITY_INV: Fq = Fq::from_raw([
+    0x3c208c16d87cfd46,
+    0x97816a916871ca8d,
+    0xb85045b68181585d,
+    0x30644e72e131a029,
+]);
 
-// Unused constant for base field
-const DELTA: Fq = Fq::zero();
+// `0x9`
+const DELTA: Fq = Fq::from_raw([0x9, 0, 0, 0]);
 
 /// `ZETA^3 = 1 mod r` where `ZETA^2 != 1 mod r`
 const ZETA: Fq = Fq::from_raw([
-    0x5763473177fffffeu64,
-    0xd4f263f1acdb5c4fu64,
-    0x59e26bcea0d48bacu64,
-    0x0u64,
+    0xe4bd44e5607cfd48,
+    0xc28f069fbb966e3d,
+    0x5e6dd9e7e0acccb0,
+    0x30644e72e131a029,
 ]);
 
-use crate::{
-    field_common, impl_add_binop_specify_output, impl_binops_additive,
-    impl_binops_additive_specify_output, impl_binops_multiplicative,
-    impl_binops_multiplicative_mixed, impl_sub_binop_specify_output, impl_sum_prod,
-};
 impl_binops_additive!(Fq, Fq);
 impl_binops_multiplicative!(Fq, Fq);
 field_common!(
@@ -117,35 +143,25 @@ field_common!(
     R3
 );
 impl_sum_prod!(Fq);
+impl_from_u64!(Fq, R2);
+
 #[cfg(not(feature = "asm"))]
 field_arithmetic!(Fq, MODULUS, INV, sparse);
 #[cfg(feature = "asm")]
 field_arithmetic_asm!(Fq, MODULUS, INV);
 
+#[cfg(target_pointer_width = "64")]
+field_bits!(Fq, MODULUS);
+#[cfg(not(target_pointer_width = "64"))]
+field_bits!(Fq, MODULUS, MODULUS_LIMBS_32);
+
 impl Fq {
     pub const fn size() -> usize {
         32
     }
-
-    pub fn legendre(&self) -> LegendreSymbol {
-        // s = self^((modulus - 1) // 2)
-        // 0x183227397098d014dc2822db40c0ac2ecbc0b548b438e5469e10460b6c3e7ea3
-        let s = &[
-            0x9e10460b6c3e7ea3u64,
-            0xcbc0b548b438e546u64,
-            0xdc2822db40c0ac2eu64,
-            0x183227397098d014u64,
-        ];
-        let s = self.pow(s);
-        if s == Self::zero() {
-            LegendreSymbol::Zero
-        } else if s == Self::one() {
-            LegendreSymbol::QuadraticResidue
-        } else {
-            LegendreSymbol::QuadraticNonResidue
-        }
-    }
 }
+
+extend_field_legendre!(Fq);
 
 impl ff::Field for Fq {
     const ZERO: Self = Self::zero();
@@ -169,7 +185,7 @@ impl ff::Field for Fq {
 
     /// Computes the square root of this element, if it exists.
     fn sqrt(&self) -> CtOption<Self> {
-        let tmp = self.pow(&[
+        let tmp = self.pow([
             0x4f082305b61f3f52,
             0x65e05aa45a1c72a3,
             0x6e14116da0605617,
@@ -183,17 +199,10 @@ impl ff::Field for Fq {
         ff::helpers::sqrt_ratio_generic(num, div)
     }
 
-    /// Computes the multiplicative inverse of this element,
-    /// failing if the element is zero.
+    /// Returns the multiplicative inverse of the
+    /// element. If it is zero, the method fails.
     fn invert(&self) -> CtOption<Self> {
-        let tmp = self.pow(&[
-            0x3c208c16d87cfd45,
-            0x97816a916871ca8d,
-            0xb85045b68181585d,
-            0x30644e72e131a029,
-        ]);
-
-        CtOption::new(tmp, !self.ct_eq(&Self::zero()))
+        self.invert()
     }
 }
 
@@ -237,16 +246,12 @@ impl ff::PrimeField for Fq {
     }
 
     fn to_repr(&self) -> Self::Repr {
-        // Turn into canonical form by computing
-        // (a.R) / R = a
-        let tmp =
-            Self::montgomery_reduce(&[self.0[0], self.0[1], self.0[2], self.0[3], 0, 0, 0, 0]);
-
+        let tmp: [u64; 4] = (*self).into();
         let mut res = [0; 32];
-        res[0..8].copy_from_slice(&tmp.0[0].to_le_bytes());
-        res[8..16].copy_from_slice(&tmp.0[1].to_le_bytes());
-        res[16..24].copy_from_slice(&tmp.0[2].to_le_bytes());
-        res[24..32].copy_from_slice(&tmp.0[3].to_le_bytes());
+        res[0..8].copy_from_slice(&tmp[0].to_le_bytes());
+        res[8..16].copy_from_slice(&tmp[1].to_le_bytes());
+        res[16..24].copy_from_slice(&tmp[2].to_le_bytes());
+        res[24..32].copy_from_slice(&tmp[3].to_le_bytes());
 
         res
     }
@@ -280,6 +285,7 @@ impl WithSmallOrderMulGroup<3> for Fq {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ff_ext::Legendre;
     use ff::Field;
     use rand_core::OsRng;
 
@@ -292,7 +298,7 @@ mod test {
             let a = Fq::random(OsRng);
             let mut b = a;
             b = b.square();
-            assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
+            assert_eq!(b.legendre(), 1);
 
             let b = b.sqrt().unwrap();
             let mut negb = b;
@@ -305,7 +311,7 @@ mod test {
         for _ in 0..10000 {
             let mut b = c;
             b = b.square();
-            assert_eq!(b.legendre(), LegendreSymbol::QuadraticResidue);
+            assert_eq!(b.legendre(), 1);
 
             b = b.sqrt().unwrap();
 
@@ -347,7 +353,20 @@ mod test {
     }
 
     #[test]
+    fn test_conversion() {
+        crate::tests::field::random_conversion_tests::<Fq>("fq".to_string());
+    }
+
+    #[test]
+    #[cfg(feature = "bits")]
+    fn test_bits() {
+        crate::tests::field::random_bits_tests::<Fq>("fq".to_string());
+    }
+
+    #[test]
     fn test_serialization() {
         crate::tests::field::random_serialization_test::<Fq>("fq".to_string());
+        #[cfg(feature = "derive_serde")]
+        crate::tests::field::random_serde_test::<Fq>("fq".to_string());
     }
 }
