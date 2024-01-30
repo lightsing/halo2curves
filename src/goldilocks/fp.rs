@@ -13,9 +13,12 @@ use rand::RngCore;
 use std::hash::Hash;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
-/// This represents an element of $\mathbb{F}_r$ where
+/// Goldilocks field
 ///
-/// `r = 2^64 - 2^32 + 1`
+/// This represents an element of $\mathbb{F}_r$ where `r = 2^64 - 2^32 + 1`
+///
+/// Most implementation are port from
+/// [plonky2](https://github.com/0xPolygonZero/plonky2/blob/main/field/src/goldilocks_field.rs)
 #[derive(Default, Copy, Clone)]
 pub struct Fp(pub(crate) u64);
 
