@@ -1,8 +1,10 @@
 #![cfg_attr(feature = "asm", feature(asm_const))]
 
 mod arithmetic;
+mod utils;
 
 pub mod bn256;
+pub mod goldilocks;
 pub mod pairing;
 pub mod pasta;
 pub mod secp256k1;
