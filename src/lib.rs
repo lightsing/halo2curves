@@ -4,8 +4,10 @@ pub mod fft;
 pub mod hash_to_curve;
 pub mod msm;
 pub mod serde;
+mod utils;
 
 pub mod bn256;
+pub mod goldilocks;
 pub mod grumpkin;
 pub mod pasta;
 pub mod pluto_eris;

@@ -24,7 +24,7 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 pub struct Fp(pub(crate) [u64; 4]);
 
 #[cfg(feature = "derive_serde")]
-crate::serialize_deserialize_32_byte_primefield!(Fp);
+crate::serialize_deserialize_bytes_primefield!(Fp);
 
 /// Constant representing the modulus
 /// p = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff
@@ -365,7 +365,7 @@ mod test {
 
     #[test]
     fn test_conversion() {
-        crate::tests::field::random_conversion_tests::<Fp>("secp256r1 base".to_string());
+        crate::tests::field::random_conversion_tests::<Fp, 32>("secp256r1 base".to_string());
     }
 
     #[test]

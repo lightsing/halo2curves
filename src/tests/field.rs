@@ -212,7 +212,9 @@ fn random_expansion_tests<F: Field, R: RngCore>(mut rng: R, type_name: String) {
     end_timer!(start);
 }
 
-pub fn random_conversion_tests<F: ff::PrimeField<Repr = [u8; 32]>>(type_name: String) {
+pub fn random_conversion_tests<F: ff::PrimeField<Repr = [u8; N]>, const N: usize>(
+    type_name: String,
+) {
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
         0xe5,
